@@ -8,6 +8,24 @@
 // License: Apache 2.0
 //////////////////////////////////////////////////////////////////////
 
+//////////////////////////////////////////////////////////////////////
+// Section: Configuration and Constants
+//////////////////////////////////////////////////////////////////////
+
+// Bounding box size for intersection operations without explicit intersect children
+// This can be overridden by setting _AOSL_BBOX_SIZE before including aosl.scad
+_AOSL_BBOX_SIZE = is_undef(_AOSL_BBOX_SIZE) ? 10000 : _AOSL_BBOX_SIZE;
+
+// Fallback constants for BOSL2 if not already defined
+// These should match BOSL2 definitions
+_AOSL_EDGES_ALL = is_undef(EDGES_ALL) ? "ALL" : EDGES_ALL;
+_AOSL_CENTER = is_undef(CENTER) ? [0, 0, 0] : CENTER;
+_AOSL_BOTTOM = is_undef(BOTTOM) ? [0, 0, -1] : BOTTOM;
+
+//////////////////////////////////////////////////////////////////////
+// Section: Core Object System
+//////////////////////////////////////////////////////////////////////
+
 // Core object constructor
 // Creates a base object structure for AOSL
 function _aosl_object(type, params=[], transforms=[], children=[], op="none", color_val=undef) =
@@ -54,15 +72,16 @@ function _add_child(obj, child, operation) =
 // Arguments:
 //   size = The size of the cuboid as [x,y,z] or a single number for a cube
 //   rounding = Optional rounding radius for edges
-//   edges = Optional edges to round (BOSL2 edge spec)
+//   edges = Optional edges to round (BOSL2 edge spec, or "ALL" if BOSL2 not loaded)
 //   center = If true, center the cuboid. Default: true
-function Cuboid(size, rounding=0, edges=EDGES_ALL, center=true) =
+function Cuboid(size, rounding=0, edges=undef, center=true) =
+    let(_edges = is_undef(edges) ? (is_undef(EDGES_ALL) ? _AOSL_EDGES_ALL : EDGES_ALL) : edges)
     _aosl_object(
         type = "cuboid",
         params = [
             ["size", size],
             ["rounding", rounding],
-            ["edges", edges],
+            ["edges", _edges],
             ["center", center]
         ]
     );
@@ -211,6 +230,10 @@ function intersect(obj, other) = _add_child(obj, other, "intersect");
 // Description:
 //   Internal module to render a single shape based on type
 module _render_shape(obj) {
+    // Get anchor constants, use fallbacks if BOSL2 not loaded
+    _center = is_undef(CENTER) ? _AOSL_CENTER : CENTER;
+    _bottom = is_undef(BOTTOM) ? _AOSL_BOTTOM : BOTTOM;
+    
     if (obj.type == "cuboid") {
         // Extract parameters
         size = [for (p = obj.params) if (p[0] == "size") p[1]][0];
@@ -219,9 +242,9 @@ module _render_shape(obj) {
         center = [for (p = obj.params) if (p[0] == "center") p[1]][0];
         
         if (rounding > 0) {
-            cuboid(size, rounding=rounding, edges=edges, anchor=center ? CENTER : BOTTOM);
+            cuboid(size, rounding=rounding, edges=edges, anchor=center ? _center : _bottom);
         } else {
-            cuboid(size, anchor=center ? CENTER : BOTTOM);
+            cuboid(size, anchor=center ? _center : _bottom);
         }
     }
     else if (obj.type == "cylinder") {
@@ -236,13 +259,13 @@ module _render_shape(obj) {
         center = [for (p = obj.params) if (p[0] == "center") p[1]][0];
         
         if (r1 != undef || r2 != undef || d1 != undef || d2 != undef) {
-            cyl(h=h, r1=r1, r2=r2, d1=d1, d2=d2, anchor=center ? CENTER : BOTTOM);
+            cyl(h=h, r1=r1, r2=r2, d1=d1, d2=d2, anchor=center ? _center : _bottom);
         } else if (r != undef) {
-            cyl(h=h, r=r, anchor=center ? CENTER : BOTTOM);
+            cyl(h=h, r=r, anchor=center ? _center : _bottom);
         } else if (d != undef) {
-            cyl(h=h, d=d, anchor=center ? CENTER : BOTTOM);
+            cyl(h=h, d=d, anchor=center ? _center : _bottom);
         } else {
-            cyl(h=h, anchor=center ? CENTER : BOTTOM);
+            cyl(h=h, anchor=center ? _center : _bottom);
         }
     }
     else if (obj.type == "sphere") {
@@ -284,26 +307,6 @@ module _apply_transforms(transforms) {
             mirror(t_params) _apply_transforms(remaining) children();
         } else {
             _apply_transforms(remaining) children();
-        }
-    }
-}
-
-// Module: _render_children()
-// Usage:
-//   _render_children(children_list);
-// Description:
-//   Internal module to render child objects with boolean operations
-module _render_children(children_list) {
-    for (i = [0:len(children_list)-1]) {
-        child_obj = children_list[i][0];
-        child_op = children_list[i][1];
-        
-        if (child_op == "subtract") {
-            render(child_obj);
-        } else if (child_op == "intersect") {
-            render(child_obj);
-        } else if (child_op == "union") {
-            render(child_obj);
         }
     }
 }
@@ -353,7 +356,8 @@ module _render_with_children(obj) {
                     }
                 } else {
                     // If no intersect children, create a large bounding box
-                    cube([10000, 10000, 10000], center=true);
+                    // Size is configurable via _AOSL_BBOX_SIZE
+                    cube([_AOSL_BBOX_SIZE, _AOSL_BBOX_SIZE, _AOSL_BBOX_SIZE], center=true);
                 }
             }
             
